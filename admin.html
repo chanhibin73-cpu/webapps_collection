@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理者ダッシュボード | Web Apps Collection</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-color: #f1f5f9;
+            --card-bg: #ffffff;
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --accent-color: #2563eb;
+            --border-color: #e2e8f0;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            padding: 2rem 1rem;
+        }
+
+        .container { max-width: 1100px; margin: 0 auto; display: none; } /* 初期表示は非表示 */
+
+        /* ログイン画面のスタイル */
+        .login-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: var(--bg-color); display: flex;
+            justify-content: center; align-items: center; z-index: 9999;
+        }
+        .login-card {
+            background: var(--card-bg); padding: 2rem; border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid var(--border-color);
+            text-align: center; max-width: 360px; width: 90%;
+        }
+        .login-card h2 { margin-bottom: 1rem; font-size: 1.25rem; }
+        .login-card input {
+            width: 100%; padding: 0.6rem; margin-bottom: 1rem; border-radius: 6px;
+            border: 1px solid var(--border-color); font-size: 1rem; text-align: center;
+        }
+        .login-card button {
+            width: 100%; padding: 0.6rem; background: var(--accent-color); color: white;
+            border: none; border-radius: 6px; font-weight: bold; cursor: pointer;
+        }
+
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+        .back-btn {
+            background-color: var(--accent-color); color: white; padding: 0.5rem 1rem;
+            text-decoration: none; border-radius: 6px; font-size: 0.9rem; font-weight: 600;
+        }
+
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; margin-bottom: 2.5rem; }
+        .stat-card { background: var(--card-bg); border: 1px solid var(--border-color); padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .stat-title { font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem; }
+        .stat-value { font-size: 2rem; font-weight: 700; color: var(--accent-color); }
+
+        .charts-grid { display: grid; grid-template-columns: 1fr; gap: 2rem; }
+        .chart-card { background: var(--card-bg); border: 1px solid var(--border-color); padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .chart-card h2 { font-size: 1.1rem; margin-bottom: 1rem; color: var(--text-primary); }
+
+        canvas { width: 100% !important; max-height: 380px; }
+    </style>
+</head>
+<body>
+
+<!-- ログイン画面 -->
+<div class="login-overlay" id="loginModal">
+    <div class="login-card">
+        <h2>🔒 管理者認証</h2>
+        <input type="password" id="passwordInput" placeholder="パスワードを入力">
+        <button onclick="checkPassword()">ログイン</button>
+    </div>
+</div>
+
+<!-- ダッシュボード本体 -->
+<div class="container" id="dashboard">
+    <div class="header">
+        <h1>🔒 管理者ダッシュボード</h1>
+        <a href="index.html" class="back-btn">← メインサイトへ戻る</a>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-title">累計ポータルアクセス数（全ユーザー）</div>
+            <div class="stat-value" id="total-views">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-title">累計各サイトへ飛んだ回数（全ユーザー）</div>
+            <div class="stat-value" id="total-clicks">0</div>
+        </div>
+    </div>
+
+    <div class="charts-grid">
+        <div class="chart-card">
+            <h2>📊 時間帯別アクセス数（4時間区切り）</h2>
+            <canvas id="views4hChart"></canvas>
+        </div>
+        <div class="chart-card">
+            <h2>🔗 各サイトへの遷移回数</h2>
+            <canvas id="siteClicksChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Firebaseの読み込みとロジック -->
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+    import { getDatabase, ref, get } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+
+    // いただいたFirebase設定
+    const firebaseConfig = {
+      apiKey: "AIzaSyAmfx5dTWws1-yR7K80p-bJS0STbsLnttE",
+      authDomain: "webapps-collection.firebaseapp.com",
+      databaseURL: "https://webapps-collection-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "webapps-collection",
+      storageBucket: "webapps-collection.firebasestorage.app",
+      messagingSenderId: "630369398063",
+      appId: "1:630369398063:web:d41e12e46f2a632e7e45da"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // 管理者パスワード
+    const ADMIN_PASSWORD = 'HIBIYURI20250315';
+
+    // HTMLのonclickから呼び出せるようにwindowに登録
+    window.checkPassword = function() {
+        const input = document.getElementById('passwordInput').value;
+        if (input === ADMIN_PASSWORD) {
+            document.getElementById('loginModal').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'block';
+            initDashboard();
+        } else {
+            alert('パスワードが違います');
+        }
+    };
+
+    async function initDashboard() {
+        try {
+            // Firebaseから全員のデータを取得
+            const viewsSnapshot = await get(ref(db, 'page_views'));
+            const clicksSnapshot = await get(ref(db, 'clicks'));
+
+            let viewsLog = [];
+            if (viewsSnapshot.exists()) {
+                Object.values(viewsSnapshot.val()).forEach(item => viewsLog.push(item.time));
+            }
+
+            let clicksLog = [];
+            if (clicksSnapshot.exists()) {
+                Object.values(clicksSnapshot.val()).forEach(item => clicksLog.push(item));
+            }
+
+            // 統計の表示
+            document.getElementById('total-views').innerText = viewsLog.length.toLocaleString();
+            document.getElementById('total-clicks').innerText = clicksLog.length.toLocaleString();
+
+            // グラフの描画処理
+            drawCharts(viewsLog, clicksLog);
+
+        } catch (error) {
+            console.error("データの取得に失敗しました", error);
+            alert("データの読み込みに失敗しました。Firebaseのルール設定などを確認してください。");
+        }
+    }
+
+    function drawCharts(viewsLog, clicksLog) {
+        // --- 4時間ごとのアクセスグラフ ---
+        const counts = [0, 0, 0, 0, 0, 0];
+        viewsLog.forEach(timeStr => {
+            const hour = new Date(timeStr).getHours();
+            counts[Math.floor(hour / 4)]++;
+        });
+
+        new Chart(document.getElementById('views4hChart'), {
+            type: 'bar',
+            data: {
+                labels: ['0~4時', '4~8時', '8~12時', '12~16時', '16~20時', '20~24時'],
+                datasets: [{ label: 'アクセス数', data: counts, backgroundColor: '#2563eb', borderRadius: 6 }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+
+        // --- サイト別のクリックグラフ ---
+        const siteCounts = {};
+        clicksLog.forEach(item => { siteCounts[item.site] = (siteCounts[item.site] || 0) + 1; });
+
+        new Chart(document.getElementById('siteClicksChart'), {
+            type: 'bar',
+            data: {
+                labels: Object.keys(siteCounts),
+                datasets: [{ label: 'クリック回数', data: Object.values(siteCounts), backgroundColor: '#10b981', borderRadius: 6 }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y' }
+        });
+    }
+</script>
+
+</body>
+</html>
